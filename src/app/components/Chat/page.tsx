@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { auth, googleProvider } from "../../lib/firebase";
+import {
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+} from "firebase/auth";
 
 type Message = {
   id: number;
@@ -9,42 +17,71 @@ type Message = {
   timestamp: string;
 };
 
-const Chat = () => {
+const ChatApp = () => {
+  const [user, setUser] = useState(auth.currentUser);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [username, setUsername] = useState("");
-  const [isUsernameSet, setIsUsernameSet] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Загружаем данные из localStorage при первом рендере
   useEffect(() => {
-    const savedMessages = localStorage.getItem("chatMessages");
-    const savedUsername = localStorage.getItem("chatUsername");
-
-    if (savedMessages) setMessages(JSON.parse(savedMessages));
-    if (savedUsername) {
-      setUsername(savedUsername);
-      setIsUsernameSet(true);
-    }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
   }, []);
 
-  // Сохранение сообщений в localStorage при изменении
+  useEffect(() => {
+    const savedMessages = localStorage.getItem("chatMessages");
+    if (savedMessages) setMessages(JSON.parse(savedMessages));
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("chatMessages", JSON.stringify(messages));
   }, [messages]);
 
-  // Автоскролл вниз
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const login = async () => {
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      console.error("Ошибка входа:", error);
+    }
+  };
+
+  const register = async () => {
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      console.error("Ошибка регистрации:", error);
+    }
+  };
+
+  const loginWithGoogle = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Ошибка Google-входа:", error);
+    }
+  };
+
+  const logout = async () => {
+    await signOut(auth);
+  };
+
   const sendMessage = () => {
-    if (!input.trim() || !isUsernameSet) return;
+    if (!input.trim() || !user) return;
+
+    const senderName = user.displayName || user.email || "Аноним";
 
     const newMessage: Message = {
       id: Date.now(),
       text: input,
-      sender: username,
+      sender: senderName,
       timestamp: new Date().toLocaleTimeString(),
     };
 
@@ -57,42 +94,26 @@ const Chat = () => {
     localStorage.removeItem("chatMessages");
   };
 
-  const handleUsernameSubmit = () => {
-    if (!username.trim()) return;
-    localStorage.setItem("chatUsername", username);
-    setIsUsernameSet(true);
-  };
-
   return (
     <div className="max-w-md mx-auto p-6 bg-white shadow-md rounded-lg">
-      <h2 className="text-xl font-semibold text-center mb-4">Чат</h2>
-
-      {/* Форма для установки имени */}
-      {!isUsernameSet ? (
-        <div className="flex flex-col items-center gap-2">
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Введите ваше имя..."
-            className="p-2 border rounded-lg w-full"
-          />
-          <button
-            onClick={handleUsernameSubmit}
-            className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
-          >
-            Подтвердить
-          </button>
-        </div>
-      ) : (
+      {user ? (
         <>
-          {/* Список сообщений */}
+          <div className="flex justify-between mb-4">
+            <h2 className="text-xl font-semibold">Чат</h2>
+            <button
+              onClick={logout}
+              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+            >
+              Выйти
+            </button>
+          </div>
+
           <div className="h-64 overflow-y-auto border p-2 rounded-lg mb-4">
             {messages.map((msg) => (
               <div
                 key={msg.id}
                 className={`p-2 mb-2 rounded-md ${
-                  msg.sender === username
+                  msg.sender === user.displayName || msg.sender === user.email
                     ? "bg-blue-500 text-white text-right ml-auto"
                     : "bg-gray-100 text-black"
                 } max-w-[75%]`}
@@ -105,7 +126,6 @@ const Chat = () => {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Форма ввода сообщения */}
           <div className="flex gap-2">
             <input
               type="text"
@@ -128,9 +148,36 @@ const Chat = () => {
             </button>
           </div>
         </>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-xl font-semibold text-center">Авторизация</h2>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="p-2 border rounded-lg"
+          />
+          <input
+            type="password"
+            placeholder="Пароль"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="p-2 border rounded-lg"
+          />
+          <button onClick={login} className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+            Войти
+          </button>
+          <button onClick={register} className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600">
+            Регистрация
+          </button>
+          <button onClick={loginWithGoogle} className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800">
+            Войти через Google
+          </button>
+        </div>
       )}
     </div>
   );
 };
 
-export default Chat;
+export default ChatApp;
